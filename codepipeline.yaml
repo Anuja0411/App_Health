@@ -1,0 +1,231 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: 'CodePipeline to deploy the Health API using CodeBuild and GitHub repo as asource'
+
+Parameters:
+  CodeStarConnectionArn:
+    Type: String
+    Description: ARN of the CodeStar connection created in CodePipeline for GitHub(2)
+
+  GitHubRepository:
+    Type: String
+    Description:  owner/repository/
+
+  GitHubBranch:
+    Type: String
+    Description: GitHub branch name 
+
+  Environment:
+    AllowedValues:
+    - Dev
+    - Prod
+    Description: 'Environment'
+    Type: 'String'
+
+  CodePipelineBucketName:
+    Description: Bucket name for CodePipeline to use
+    Type: String
+
+Resources:
+
+  CodeBuildRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName:
+        'Fn::Join': [ "", ["CodeBuildRole", "-", !Ref 'AWS::StackName', "-", !Ref 'Environment']]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: "Allow"
+          Principal:
+            Service: "codebuild.amazonaws.com"
+          Action: "sts:AssumeRole"
+
+  CodePipelineRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName:
+        'Fn::Join': [ "", ["CodePipelineRole", "-", !Ref 'AWS::StackName', "-", !Ref 'Environment']]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: "Allow"
+          Principal:
+            Service: "codepipeline.amazonaws.com"
+          Action: "sts:AssumeRole"
+
+  # This can be restricted more
+  CodeBuildPolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName:
+        'Fn::Join': [ "", ["CodeBuildPolicy", "-", !Ref 'AWS::StackName', "-", !Ref 'Environment']]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            - logs:DescribeLogGroups
+            - logs:FilterLogEvents
+            - logs:DescribeLogStreams
+            - logs:DeleteLogGroup
+            - s3:putObject
+            - s3:getObject
+            - codebuild:*
+            - 'cloudformation:List*'
+            - 'cloudformation:Get*'
+            - 'cloudformation:PreviewStackUpdate'
+            - 'cloudformation:ValidateTemplate'
+            - 'cloudformation:CreateStack'
+            - 'cloudformation:CreateUploadBucket'
+            - 'cloudformation:DeleteStack'
+            - 'cloudformation:Describe*'
+            - 'cloudformation:UpdateStack'
+            - 'cloudformation:CreateChangeSet'
+            - 'cloudformation:ExecuteChangeSet'
+            - 'lambda:Get*'
+            - 'lambda:List*'
+            - 'lambda:CreateFunction'
+            - 'lambda:AddPermission'
+            - 'lambda:CreateAlias'
+            - 'lambda:DeleteFunction'
+            - 'lambda:InvokeFunction'
+            - 'lambda:PublishVersion'
+            - 'lambda:RemovePermission'
+            - 'lambda:Update*'
+            - 'apigateway:GET'
+            - 'apigateway:POST'
+            - 'apigateway:PUT'
+            - 'apigateway:DELETE'
+            - 's3:CreateBucket'
+            - 's3:DeleteBucket'
+            - 's3:ListBucket'
+            - 's3:ListBucketVersions'
+            - 's3:PutObject'
+            - 's3:GetObject'
+            - 's3:DeleteObject'
+            - 'iam:PassRole'
+            - 'iam:GetRole'
+            - 'iam:CreateRole'
+            - 'iam:PutRolePolicy'
+            - 'iam:DeleteRolePolicy'
+            - 'iam:DeleteRole'
+            - 'cloudwatch:GetMetricStatistics'
+            - 'events:Put*'
+            - 'events:Remove*'
+            - 'events:Delete*'
+            - 'apigateway:*'
+          Resource: "*"
+      Roles:
+        -  !Ref CodeBuildRole
+
+  ## Policy can be further restricted. For the purposes of the demo, the permissions are not too restrictive
+  CodePipelinePolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName:
+        'Fn::Join': [ "", ["CodePipelinePolicy", "-", !Ref 'AWS::StackName', "-", !Ref 'Environment']]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            - s3:*
+            - codebuild:*
+            - codestar-connections:*
+          Resource:
+            - "*"
+      Roles:
+        -  !Ref CodePipelineRole
+
+  Builder:
+    Type: "AWS::CodeBuild::Project"
+    Properties:
+      Name: Test-Builder
+      Description: Demo of CodeBuild with CodeDeploy pipeline.
+      ServiceRole: !Ref CodeBuildRole
+      TimeoutInMinutes: 5
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: "buildspec.yml"
+      Environment:
+        Type: "LINUX_CONTAINER"
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+      Artifacts:
+        Type: CODEPIPELINE
+
+  # CodePipeline with its stages:
+  Pipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      Name: !Join [ "", ["DevOps-Pipeline", "-", !Ref 'AWS::StackName'] ]
+      ArtifactStore:
+        Location: !Ref CodePipelineBucketName
+        Type: S3
+      RestartExecutionOnUpdate: true
+      RoleArn: !Join [ "", ["arn:aws:iam::", !Ref "AWS::AccountId", ":role/", !Ref CodePipelineRole  ] ]
+      Stages:
+
+        # Stage 1:  Get the source from GitHub:
+        - Name: Source
+          Actions:
+            - InputArtifacts: []
+              ActionTypeId:
+                Version: '1'
+                Owner: AWS
+                Category: Source
+                Provider: CodeStarSourceConnection
+              OutputArtifacts:
+                - Name: TheSourceCode
+              RunOrder: 1
+              Configuration:
+                ConnectionArn: 
+                  Ref: CodeStarConnectionArn
+                FullRepositoryId: 
+                  Ref: GitHubRepository
+                BranchName: 
+                  Ref: GitHubBranch
+              Name: SourceAction
+
+        # Stage 2:  Build the stack via CFN
+        - Name: Builder
+          Actions:
+            - Name: Test-Builder
+              RunOrder: 1
+              InputArtifacts:
+                - Name: TheSourceCode
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName:  
+                  Ref: Builder
+              OutputArtifacts:
+                - Name: TheArtifact
+
+Outputs:
+  CodeBuild:
+    Value: !Ref Pipeline
+  Environment:
+    Value: !Ref Environment
+  Github:
+    Value: !Ref GitHubRepository
+  CodeBuildRole:
+    Value: !Ref CodeBuildRole
+  CodeBuildPolicy:
+    Value: !Ref CodeBuildPolicy
+  CodePipelineRole:
+    Value: !Ref CodePipelineRole
+  CodePipelinePolicy:
+    Value: !Ref CodePipelinePolicy
+  S3:
+    Value: !Ref CodePipelineBucketName

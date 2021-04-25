@@ -1,0 +1,35 @@
+version: 0.2
+
+# Update the environment variables as per your deployment environment and app details
+env:
+  variables:
+    APP_NAME: "API-HEALTH-CHECK"
+    APP_VERSION: "1.0"
+    CFN_S3_BUCKET: "cf-templates-z22ztg3b5ql1-ap-southeast-2"
+
+phases:
+  install:
+    commands:
+      - echo "AWS Version:" `aws --version`
+  pre_build:
+    commands:
+      - echo "Listing project folder for debugging ..."
+      - ls
+      - echo "Listing env variables for debugging ..."
+      - echo "APP_NAME:"$APP_NAME
+      - echo "APP_VERSION:"$APP_VERSION
+      - echo "CFN_S3_BUCKET:"$CFN_S3_BUCKET
+  build:
+    commands:
+      - aws cloudformation package --template-file cfn.yaml --s3-bucket "$CFN_S3_BUCKET" --output-template-file outputTemplate.yaml
+      - aws cloudformation deploy --template-file outputTemplate.yaml --stack-name $APP_NAME --parameter-overrides AppName=$APP_NAME AppVersion=$APP_VERSION GitHash=$CODEBUILD_RESOLVED_SOURCE_VERSION --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+  post_build:
+    commands:
+      - echo Entered the post_build phase...
+      - echo "You can run Unit tests for the deployment here ... "
+      - echo Build completed on `date`
+
+artifacts:
+  type: zip
+  files: 
+    - outputTemplate.yaml
