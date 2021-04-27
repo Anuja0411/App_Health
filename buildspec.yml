@@ -4,7 +4,7 @@ version: 0.2
 env:
   variables:
     APP_NAME: "API-HEALTH-CHECK"
-    APP_VERSION: "1.0"
+    APP_VERSION: "2.0"
     CFN_S3_BUCKET: "cf-templates-z22ztg3b5ql1-ap-southeast-2"
 
 phases:
